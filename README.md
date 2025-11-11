@@ -152,3 +152,54 @@ Each numbered script forms a step in a **sequentially dependent pipeline**, resp
 
 ## 🧩 Data Flow Diagram (Textual)
 
+
+
+
+---
+
+## 📊 Key Technical Highlights
+
+- **Concurrency-Aware Design:**  
+  Controlled async pools, global rate limits, retry and backoff.
+- **NDJSON Architecture:**  
+  Enables resumable incremental fetch and efficient merges.
+- **Safe-Write Pattern:**  
+  Temp-file and atomic rename to prevent data corruption.
+- **Fault-Tolerant Resume:**  
+  Each phase can restart from partial progress.
+- **Logging and Monitoring:**  
+  Heartbeat intervals, milestone counters, progress snapshots.
+- **Extensibility:**  
+  Easily adapted for future data domains or Europass API variations.
+
+---
+
+## 🧾 Directory Summary
+
+| Directory | Description |
+|------------|-------------|
+| `/files` | Raw paginated results (per-country × EQF level) |
+| `/countryFiles` | Merged NDJSON per country |
+| `/qualificationData` | Detailed qualification JSONs |
+| `/meta` | Per-country progress metadata |
+| `/output_learningOpportunities` | EQF-wise learning opportunity datasets |
+| `/output_qualifications` | EQF-wise qualification datasets |
+| `/json_learningOpportunities` | Deep scraped learning opportunity JSONs |
+| `/json_qualifications` | Deep scraped qualification JSONs |
+| `/qualificationsValid.csv` | Final structured dataset for analytics |
+
+---
+
+## 🚀 Execution Order (Summary)
+
+```bash
+node 00save2.js
+node 01country_merge.js
+node 02fetchCountries.js
+node 03extractData.js
+node 10fetch_learningOpportunities.js
+node 11fetch_qualification.js
+node 12scrape_europass.js
+node 20scraper_opportunities.js
+node 21scraper_qualifications.js
+
