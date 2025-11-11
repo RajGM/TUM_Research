@@ -3,194 +3,226 @@
 **Version:** 2025.11  
 **Author:** Raj Gaurav Maurya  
 **Type:** Research/Industry Technical Documentation  
-**Purpose:** End-to-end description of the automated Europass Qualification and Learning Opportunity data pipeline.
+**Purpose:** Full end-to-end documentation of the Europass Qualification and Learning Opportunity data ingestion, transformation, and AI-assisted cleaning pipeline.
 
 ---
 
 ## 🗺️ Overview
 
-This pipeline orchestrates a multi-stage data collection and transformation workflow from the [Europass ePortfolio QDR API](https://europa.eu/europass/eportfolio/api/qdr/europass/qdr-search/search).
+This repository defines a **multi-stage data engineering pipeline** for the extraction, enrichment, and cleaning of Europass qualifications and learning opportunities across all EQF levels (1–8).
 
-It performs **massive, resumable, concurrent crawling** across all EU and EEA countries, covering both **qualifications** and **learning opportunities** according to EQF (European Qualifications Framework) levels.
+The pipeline performs:
+- **Concurrent scraping** of the Europass QDR API.
+- **Structured merging** by country and qualification type.
+- **Hierarchical extraction** of metadata and learning outcomes.
+- **Text normalization and AI-assisted cleaning** of descriptions.
+- **Final dataset merging** for analytics and sharing.
 
-Each numbered script forms a step in a **sequentially dependent pipeline**, responsible for one logical phase of data processing.
+Each file in the sequence has a numeric prefix (e.g., `00`, `300`, `500`) that defines the **execution order**.
 
 ---
 
-## 🔢 Pipeline Sequence Summary
+## 🔢 Full Pipeline Sequence
 
 | Step | Script | Purpose | Input | Output |
 |------|---------|----------|--------|---------|
-| 00 | `00save2.js` | Bulk concurrent fetch of Europass QDR search results by country and EQF level. | Europass QDR API | Per-(country, level) `.ndjson` files + `europass_meta.json` |
-| 01 | `01country_merge.js` | Merge per-level `.ndjson` into one file per country. | `/files` | `/countryFiles/<country>.ndjson` |
-| 02 | `02fetchCountries.js` | Fetch each qualification detail by URI, resume-safe. | `/countryFiles/*.ndjson` | `/qualificationData/<country>/*.json` + meta |
-| 03 | `03extractData.js` | Extract structured attributes (title, level, outcomes, description) and export CSV. | `/qualificationData` | `qualificationsValid.csv` |
-| 10 | `10fetch_learningOpportunities.js` | Fetch paginated learning opportunities (EQF 1–5). | Europass API | `/output_learningOpportunities/level{n}.ndjson` |
-| 11 | `11fetch_qualification.js` | Fetch paginated qualifications (EQF 1–8). | Europass API | `/output_qualifications/level{n}.ndjson` |
-| 12 | `12scrape_europass.js` | Generic Europass scraper (base template). | Europass API | `/output/level{n}.ndjson` |
-| 20 | `20scraper_opportunities.js` | Deep scrape learning opportunities by UUID. | `levelXindex.json` | `/json_learningOpportunities/*.json` |
-| 21 | `21scraper_qualifications.js` | Deep scrape qualifications by UUID. | `levelXindex.json` | `/json_qualifications/*.json` |
+| 00 | `00save2.js` | Bulk concurrent fetch from Europass API by country & EQF level | Europass API | `/files/*.ndjson` |
+| 01 | `01country_merge.js` | Merge EQF-level files into one per country | `/files` | `/countryFiles/<country>.ndjson` |
+| 02 | `02fetchCountries.js` | Fetch full qualification JSONs per URI | `/countryFiles` | `/qualificationData` |
+| 03 | `03extractData.js` | Extract structured qualification data into CSV | `/qualificationData` | `qualificationsValid.csv` |
+| 10 | `10fetch_learningOpportunities.js` | Paginated fetch of learning opportunities | Europass API | `/output_learningOpportunities` |
+| 11 | `11fetch_qualification.js` | Paginated fetch of qualifications | Europass API | `/output_qualifications` |
+| 12 | `12scrape_europass.js` | Generic Europass scraper template | Europass API | `/output/` |
+| 20 | `20scraper_opportunities.js` | Deep scrape of learning opportunity JSONs | `index.json` | `/json_learningOpportunities` |
+| 21 | `21scraper_qualifications.js` | Deep scrape of qualification JSONs | `index.json` | `/json_qualifications` |
+| 300 | `300extract_learningOpportunities.js` | Extracts learning opportunity JSONs into CSV | `/json_learningOpportunities` | `learning_opportunities_output.csv` |
+| 301 | `301filter_learningOpportunities.js` | Filters incomplete rows from LO CSV | `learning_opportunities_output.csv` | `learning_opportunities_output_filtered.csv` |
+| 302 | `302final_learningOpportunities.js` | Cleans, transforms & normalizes LO data | `learning_opportunities_output_filtered.csv` | `learning_opportunities_transformed.csv` |
+| 303 | `303polished_learningOpportunities.js` | Cleans enumeration markers in text | `learning_opportunities_transformed.csv` | `learning_opportunities_nomore.csv` |
+| 310 | `310extract_qualifications.js` | Extracts qualification JSONs into CSV | `/json_qualifications` | `output_all.csv` |
+| 311 | `311filter_qualifications.js` | Filters and shards large qualification CSV | `output_all.csv` | `filtered_qualifications.csv` |
+| 313 | `313clean_qualification.js` | Cleans noise, HTML, and garbage LOs | `filtered_qualifications.csv` | `cleaned_qualifications.csv` |
+| 312 | `312final_qualifications.js` | Adds numeric EQF level column | `cleaned_qualifications.csv` | `final_qualifications.csv` |
+| 400 | `400AIClean.js` | AI-assisted cleaning of text using OpenAI API | `final_qualifications.csv` or LO file | `*_cleaned.csv`, audit logs |
+| 500 | `500mergeSharing.js` | Merges final LO and Qualification datasets | `learning_opportunities_nomore.csv`, `final_qualifications.csv` | `europass_combined.csv` |
 
 ---
 
-## ⚙️ Step-by-Step Breakdown
+## ⚙️ Detailed Stage Descriptions
 
-### **00. `00save2.js` – Europass Bulk Fetch Engine**
+### 🧩 Stage 300–303: Learning Opportunity CSV Processing
 
-- **Goal:** Download all Europass records for all EQF levels (1–8) across 40+ European countries.
-- **Concurrency:** Up to **10 countries in parallel**.
-- **Rate limiting:** 3 requests/second across all workers.
-- **Fault tolerance:**  
-  - Retries up to 3× per request.  
-  - Resumable via `europass_meta.json`.  
-  - Heartbeat every 60s; stall detection.
-- **Output:**
-  - `/files/<country>_eqf<level>.ndjson`
-  - `europass_meta.json` (safe-write atomic commits)
-- **Modes:** `TYPE = "qualification"` or `"learning-opportunity"`.
+#### **300extract_learningOpportunities.js**
+- Extracts structured CSV from raw JSON files (`/json_learningOpportunities`).
+- Handles 100k+ files efficiently using:
+  - A custom **Semaphore** for concurrency control.
+  - Streamed CSV writing with **backpressure management**.
+  - Minimal memory footprint.
+- Fields extracted:
+  - `title`
+  - `countryCode.prefLabel`
+  - `EQFLevel.prefLabel`
+  - `learningOutcomeSummary.noteLiteral`
+  - `learningOutcome` (JSON array)
 
----
-
-### **01. `01country_merge.js` – Countrywise Merge Utility**
-
-- **Goal:** Combine all EQF-level NDJSON files into single country-level NDJSONs.
-- **Method:** Stream-based concatenation (zero memory bloat).
-- **Pattern:** Matches `XXX_eqfY.ndjson` filenames.
-- **Output:** `/countryFiles/<ISO3>.ndjson`
-- **Efficiency:** Handles millions of records via streaming.
+**Output:** `learning_opportunities_output.csv`
 
 ---
 
-### **02. `02fetchCountries.js` – Qualification Detail Fetcher**
+#### **301filter_learningOpportunities.js**
+- Filters out incomplete rows with missing core fields.
+- Required columns:
+  - `title`
+  - `countryCode.prefLabel`
+  - `EQFLevel.prefLabel`
+  - `learningOutcomeSummary.noteLiteral`
+  - `learningOutcome`
+- Produces a filtered CSV retaining only valid entries.
 
-- **Goal:** Resolve each qualification URI to full JSON via the Europass API.
-- **Concurrency:** 100 requests in parallel.
-- **Rate limiting:** ~20 requests/second total.
-- **Error handling:** Exponential backoff (3 retries).
-- **Resume-safe:** Per-country `meta.json` tracks:
-  - Last processed line
-  - Success/failure counters
-  - Skipped entries
-- **Logging:**  
-  - Milestones every +100 successes/failures  
-  - Retains last 100 event samples
-- **Output:**
-  - `/qualificationData/<COUNTRY>/<UUID>.json`
-  - `/meta/<COUNTRY>_meta.json`
+**Output:** `learning_opportunities_output_filtered.csv`
 
 ---
 
-### **03. `03extractData.js` – CSV Extraction & Normalization**
+#### **302final_learningOpportunities.js**
+- Transforms filtered CSV into enriched, normalized dataset:
+  - Adds derived column `EQFLevel_numeric` (extracted from text).
+  - Combines all `learningOutcome_additionalNote` values into flattened strings.
+- Includes fallback parsing for malformed JSON via regex.
 
-- **Goal:** Transform raw JSON qualifications into structured CSV for analysis.
-- **Features:**
-  - Extracts: `title`, `country`, `qualificationLevel`, `description`, `learningOutcome`, `uri`
-  - Supports flag `--no-require-learning-outcome` to include all rows.
-  - Normalizes multilingual labels using `normalizePrefLabel()`.
-  - Extracts learning outcome text from nested `learningOutcome.additionalNote.noteLiteral`.
-- **Output:**  
-  `qualificationsValid.csv`
+**Output:** `learning_opportunities_transformed.csv`
 
 ---
 
-### **10. `10fetch_learningOpportunities.js` – Paginated Learning Opportunity Fetcher**
+#### **303polished_learningOpportunities.js**
+- Performs **final text cleanup**:
+  - Removes enumerations like `1)`, `2.`, `a)`, etc.
+  - Normalizes multi-line text.
+- Uses **PapaParse** for robust CSV parsing.
+- Outputs a polished, publication-ready version.
 
-- **Goal:** Fetch learning opportunities (EQF levels 1–5) from Europass.
-- **Process:**
-  - Iterates `from` offsets until no new records.
-  - Deduplicates via URI index.
-  - Persists progress using `.index.json` and `.progress.json`.
-  - Rebuilds a combined `.json` after each page.
-- **Resumable:** Continues from last saved `from` offset.
-- **Output:**  
-  `/output_learningOpportunities/level{n}.*`
+**Output:** `learning_opportunities_nomore.csv`
 
 ---
 
-### **11. `11fetch_qualification.js` – Paginated Qualification Fetcher**
+### 🧩 Stage 310–313: Qualification CSV Processing
 
-- Same logic as Step 10 but fetches **qualifications** instead of learning opportunities.
-- Covers EQF levels **1–8**.
-- **Output:**  
-  `/output_qualifications/level{n}.*`
+#### **310extract_qualifications.js**
+- Extracts CSV from JSON qualification data.
+- Extracted columns:
+  - `qualificationName`
+  - `country`
+  - `qualificationLevel`
+  - `description`
+  - `learningOutcomes`
+  - `entryRequirement`
+- Includes full recursive directory traversal and concurrency control.
 
----
-
-### **12. `12scrape_europass.js` – Generic Scraper Template**
-
-- Base version of the fetcher scripts.
-- Intended for custom experiments or mixed-type data retrieval.
-- Identical architecture to Steps 10–11.
-
----
-
-### **20. `20scraper_opportunities.js` – Deep Learning Opportunity Scraper**
-
-- **Goal:** Download full JSON detail for each learning opportunity.
-- **Input:** `levelXindex.json` from `/output_learningOpportunities`.
-- **Implementation:**  
-  - Uses `axios` with retry logic (up to 3×).  
-  - Concurrency = 10 requests.  
-  - Saves successful JSONs, and detailed error payloads for failures.
-- **Output:**
-  - `/json_learningOpportunities/<UUID>.json`
-  - `/json_learningOpportunities_errors/*.error.json`
+**Output:** `output_all.csv`
 
 ---
 
-### **21. `21scraper_qualifications.js` – Deep Qualification Scraper**
-
-- **Goal:** Fetch and persist detailed qualification JSONs.
-- **Input:** `levelXindex.json` from `/output_qualifications`.
-- **Concurrency:** 100 simultaneous requests.
-- **Error recovery:** Saves problematic responses in `/json_qualifications_errors`.
-- **Output:**
-  - `/json_qualifications/<UUID>.json`
-  - `/json_qualifications_errors/*.error.json`
-
----
-
-## 🧩 Data Flow Diagram (Textual)
-
-
-
+#### **311filter_qualifications.js**
+- Filters rows for data completeness and optionally shards the dataset.
+- Drops unnecessary columns (`entryRequirement`, `sourceFile`).
+- Options:
+  - Run with `rowsPerFile` argument to shard into smaller CSVs.
+  - Example:
+    ```bash
+    node 311filter_qualifications.js output_all.csv filtered 10000
+    ```
+**Output:** `filtered_qualifications.csv` (or multiple shards)
 
 ---
 
-## 📊 Key Technical Highlights
+#### **313clean_qualification.js**
+- Cleans and normalizes qualification CSV data.
+- Removes:
+  - HTML tags and entities
+  - Garbage LOs (e.g., “1.”, “NA NA”, or pure punctuation)
+  - Redundant prefixes like “Title:”, “Notes:”
+- Parses embedded JSON arrays in `learningOutcomes`.
+- Collapses whitespace and merges title + notes fields.
 
-- **Concurrency-Aware Design:**  
-  Controlled async pools, global rate limits, retry and backoff.
-- **NDJSON Architecture:**  
-  Enables resumable incremental fetch and efficient merges.
-- **Safe-Write Pattern:**  
-  Temp-file and atomic rename to prevent data corruption.
-- **Fault-Tolerant Resume:**  
-  Each phase can restart from partial progress.
-- **Logging and Monitoring:**  
-  Heartbeat intervals, milestone counters, progress snapshots.
-- **Extensibility:**  
-  Easily adapted for future data domains or Europass API variations.
+**Output:** `cleaned_qualifications.csv`
 
 ---
 
-## 🧾 Directory Summary
+#### **312final_qualifications.js**
+- Adds a **numeric EQF level** column (`qualificationLevelNum`).
+- Extracts number from strings like “Level 5” → `5`.
+- Produces ready-to-use CSV for analytics.
 
-| Directory | Description |
-|------------|-------------|
-| `/files` | Raw paginated results (per-country × EQF level) |
-| `/countryFiles` | Merged NDJSON per country |
-| `/qualificationData` | Detailed qualification JSONs |
-| `/meta` | Per-country progress metadata |
-| `/output_learningOpportunities` | EQF-wise learning opportunity datasets |
-| `/output_qualifications` | EQF-wise qualification datasets |
-| `/json_learningOpportunities` | Deep scraped learning opportunity JSONs |
-| `/json_qualifications` | Deep scraped qualification JSONs |
-| `/qualificationsValid.csv` | Final structured dataset for analytics |
+**Output:** `final_qualifications.csv`
 
 ---
 
-## 🚀 Execution Order (Summary)
+### 🧩 Stage 400: AI-Assisted Cleaning
+
+#### **400AIClean.js**
+- Integrates with **OpenAI GPT model** (`gpt-4o-mini`) for advanced text sanitization.
+- Targets columns:
+  - `description`
+  - `learningOutcomes`
+- Removes boilerplate or filler phrases such as:
+  - “Please contact provider for more information”
+  - “For more information, see website”
+  - “National Qualification Framework (NQF)”
+- Features:
+  - **30 concurrent API requests**.
+  - Checkpoint-based resumable design.
+  - Generates:
+    - `checkpoint.json`
+    - `cleaned_<file>_audit.json`
+    - `cleaned_<file>_errors.json`
+- Safe, parallel OpenAI cleaning using JSON response enforcement.
+
+**Output:** Cleaned CSV with AI-refined text.
+
+---
+
+### 🧩 Stage 500: Dataset Merging & Sharing
+
+#### **500mergeSharing.js**
+- Final dataset merger.
+- Combines two CSVs (e.g., qualifications and learning opportunities) into a single, unified dataset.
+- Skips duplicate headers automatically.
+- Streams files efficiently (handles multi-GB merges).
+
+Usage:
+```bash
+node 500mergeSharing.js learning_opportunities_nomore.csv final_qualifications.csv europass_combined.csv
+```
+
+        ┌──────────────────────────────┐
+        │ Europass API (QDR Search)    │
+        └──────────────┬───────────────┘
+                       ▼
+          [00–03] Qualification Fetch & Extraction
+                       │
+                       ▼
+          [10–12] Learning Opportunity Fetchers
+                       │
+                       ▼
+          [20–21] Deep Scrapers (JSON Level)
+                       │
+                       ▼
+          [300–303] Learning Opportunity CSVs
+                       │
+                       ▼
+          [310–313] Qualification CSVs
+                       │
+                       ▼
+          [400] AI Cleaning (GPT-4o-mini)
+                       │
+                       ▼
+          [500] Merge for Publication
+                       │
+                       ▼
+             ✅ Final Dataset (CSV)
+
+---
+
+## 🚀 Execution Order Summary
 
 ```bash
 node 00save2.js
@@ -202,4 +234,14 @@ node 11fetch_qualification.js
 node 12scrape_europass.js
 node 20scraper_opportunities.js
 node 21scraper_qualifications.js
-
+node 300extract_learningOpportunities.js
+node 301filter_learningOpportunities.js
+node 302final_learningOpportunities.js
+node 303polished_learningOpportunities.js
+node 310extract_qualifications.js
+node 311filter_qualifications.js
+node 313clean_qualification.js
+node 312final_qualifications.js
+node 400AIClean.js
+node 500mergeSharing.js
+```
