@@ -3,7 +3,7 @@
 **Version:** 2025.11  
 **Author:** Raj Gaurav Maurya  
 **Type:** Research/Industry Technical Documentation  
-**Purpose:** Full end-to-end documentation of the Europass Qualification and Learning Opportunity data ingestion, transformation, and AI-assisted cleaning pipeline.
+**Purpose:** Full end-to-end documentation of the Europass Qualification and Learning Opportunity data ingestion, transformation, and AI-assisted cleaning pipeline.   
 **Affiliation:** M.Sc. Data & Society, Technical University of Munich  
 
 **Research Leadership & Collaboration:**  
