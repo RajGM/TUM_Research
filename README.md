@@ -4,6 +4,30 @@
 **Author:** Raj Gaurav Maurya  
 **Type:** Research/Industry Technical Documentation  
 **Purpose:** Full end-to-end documentation of the Europass Qualification and Learning Opportunity data ingestion, transformation, and AI-assisted cleaning pipeline.
+**Affiliation:** M.Sc. Data & Society, Technical University of Munich  
+
+**Research Leadership & Collaboration:**  
+- **Lead Researcher:** Clara Krämer (PhD Researcher, TUM School of Social Sciences & Technology)  
+- **Supervisor:** Dr. Florian Egli (TUM – Public Policy for the Green Transition)  
+- **Role of Author:** Engineering & development of the full Europass data ingestion, transformation, cleaning, and AI-assisted processing pipeline.
+
+## 0. Context & Project Motivation (Compressed)
+
+This pipeline documents the full data engineering workflow (July–November 2025) developed for a TUM research project examining how real European qualifications can be mapped onto simulated “reskilling journeys” for Europe’s green transition. The aim is to estimate realistic training pathways by linking ESCO skills to actual qualification descriptions.
+
+The Europass dataset (~3GB XML) required extensive processing, including:  
+- Inspecting and parsing raw XML structure  
+- Scraping missing qualification descriptions (83% lacked text)  
+- Standardising **Qualification / Country / EQF Level / Description** fields  
+- Cleaning noise, boilerplate, filler text, and malformed entries  
+- Resolving country-code inconsistencies  
+- Managing **30M+ external URLs**, leading to several pipeline redesigns  
+
+Outcomes include:  
+- **100k+ cleaned qualification & training records**  
+- A browsable **knowledge graph**  
+- A web frontend for exploration  
+- Prepared data for downstream **ESCO skill–qualification cosine similarity analysis**  
 
 ---
 
